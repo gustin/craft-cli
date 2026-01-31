@@ -1,0 +1,5 @@
+[tools]
+jq = "latest"
+
+[env]
+_.path = ["bin"]

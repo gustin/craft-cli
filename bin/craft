@@ -1,0 +1,442 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Craft CLI — thin wrapper around Craft's REST API
+# Requires: CRAFT_API_KEY, CRAFT_API_BASE (set via mise)
+
+if [[ -z "${CRAFT_API_KEY:-}" || -z "${CRAFT_API_BASE:-}" ]]; then
+  echo "error: CRAFT_API_KEY and CRAFT_API_BASE must be set" >&2
+  echo "hint: check .mise.local.toml" >&2
+  exit 1
+fi
+
+FOLDER_CACHE="/tmp/craft-folders.json"
+FOLDER_CACHE_TTL=300 # 5 minutes
+
+# --- core helpers ---
+
+_api() {
+  local method="$1" path="$2"; shift 2
+  curl -s -X "$method" \
+    -H "Authorization: Bearer $CRAFT_API_KEY" \
+    -H "Content-Type: application/json" \
+    "$@" "${CRAFT_API_BASE}/${path}"
+}
+
+_api_md() {
+  local path="$1"; shift
+  curl -s -X GET \
+    -H "Authorization: Bearer $CRAFT_API_KEY" \
+    -H "Accept: text/markdown" \
+    "$@" "${CRAFT_API_BASE}/${path}"
+}
+
+_jq() { jq "$@"; }
+
+_urlencode() {
+  jq -rn --arg s "$1" '$s | @uri'
+}
+
+# --- folder resolution ---
+
+_refresh_folder_cache() {
+  if [[ -f "$FOLDER_CACHE" ]]; then
+    local age=$(( $(date +%s) - $(stat -f%m "$FOLDER_CACHE" 2>/dev/null || echo 0) ))
+    if (( age < FOLDER_CACHE_TTL )); then
+      return
+    fi
+  fi
+  _api GET folders > "$FOLDER_CACHE"
+}
+
+_resolve_folder() {
+  local input="$1"
+  # If it looks like a UUID, use as-is
+  if [[ "$input" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    echo "$input"
+    return
+  fi
+  _refresh_folder_cache
+  # Search folder names: prefer exact match, then case-insensitive prefix, then substring
+  local id
+  id=$(jq -r --arg q "$input" '
+    [.. | objects | select(.name?) | {id, name}]
+    | (map(select(.name == $q)) | first | .id // null) //
+      (map(select(.name | test("^\($q)"; "i"))) | first | .id // null) //
+      (map(select(.name | test($q; "i"))) | first | .id // null)
+    // empty
+  ' "$FOLDER_CACHE")
+  if [[ -z "$id" ]]; then
+    echo "error: folder '$input' not found" >&2
+    return 1
+  fi
+  echo "$id"
+}
+
+# --- commands ---
+
+cmd_folders() {
+  local json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local data
+  data=$(_api GET folders)
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '
+    def print_tree(indent):
+      .[] | "\(indent)\(.name) (\(.documentCount) docs) [\(.id)]",
+      (.folders | if length > 0 then print_tree("\(indent)  ") else empty end);
+    .items | print_tree("")
+  '
+}
+
+cmd_docs() {
+  local folder="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --folder|-f) folder="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local params=""
+  if [[ -n "$folder" ]]; then
+    local folder_id
+    folder_id=$(_resolve_folder "$folder")
+    params="folderId=$folder_id"
+  fi
+
+  local data
+  data=$(_api GET "documents${params:+?$params}")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] | "\(.id)  \(.title)"'
+}
+
+cmd_search() {
+  local query="" folder="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --folder|-f) folder="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$query" ]]; then
+    echo "usage: craft search \"query\" [--folder NAME]" >&2
+    return 1
+  fi
+
+  local params="include=$(_urlencode "$query")"
+  if [[ -n "$folder" ]]; then
+    local folder_id
+    folder_id=$(_resolve_folder "$folder")
+    params="${params}&folderIds=$folder_id"
+  fi
+
+  local data
+  data=$(_api GET "documents/search?$params")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] | "\(.documentId)  \(.markdown // "" | gsub("\n"; " ") | .[:120])"'
+}
+
+cmd_read() {
+  local doc_id="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft read <docId>" >&2
+    return 1
+  fi
+
+  if $json_flag; then
+    _api GET "blocks?id=$doc_id" | _jq .
+  else
+    _api_md "blocks?id=$doc_id"
+  fi
+}
+
+cmd_today() {
+  local json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  if $json_flag; then
+    _api GET "blocks?date=today" | _jq .
+  else
+    _api_md "blocks?date=today"
+  fi
+}
+
+cmd_create() {
+  local title="" folder="" json_flag=false content=""
+  # Read stdin first if available, before arg parsing touches it
+  if [[ ! -t 0 ]]; then
+    content=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --folder|-f) folder="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) title="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$title" ]]; then
+    echo "usage: craft create \"title\" [--folder NAME] < content.md" >&2
+    return 1
+  fi
+
+  # Build create payload
+  local dest=""
+  if [[ -n "$folder" ]]; then
+    local folder_id
+    folder_id=$(_resolve_folder "$folder")
+    dest=", \"destination\": {\"folderId\": \"$folder_id\"}"
+  fi
+
+  local doc_result
+  doc_result=$(_api POST documents -d "{\"documents\": [{\"title\": \"$title\"}]$dest}")
+  local doc_id
+  doc_id=$(echo "$doc_result" | jq -r '.items[0].id')
+
+  if [[ -z "$doc_id" || "$doc_id" == "null" ]]; then
+    echo "error: failed to create document" >&2
+    echo "$doc_result" >&2
+    return 1
+  fi
+
+  # If we captured stdin content, insert it
+  if [[ -n "$content" ]]; then
+    local payload
+    payload=$(jq -n --arg md "$content" --arg id "$doc_id" \
+      '{markdown: $md, position: {position: "end", pageId: $id}}')
+    _api POST blocks -d "$payload" > /dev/null
+  fi
+
+  if $json_flag; then
+    echo "$doc_result" | _jq .
+  else
+    echo "$doc_id  $title"
+  fi
+}
+
+cmd_append() {
+  local doc_id="" json_flag=false content=""
+  if [[ ! -t 0 ]]; then
+    content=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft append <docId> < content.md" >&2
+    return 1
+  fi
+
+  if [[ -z "$content" ]]; then
+    echo "error: no content on stdin" >&2
+    return 1
+  fi
+
+  local payload
+  payload=$(jq -n --arg md "$content" --arg id "$doc_id" \
+    '{markdown: $md, position: {position: "end", pageId: $id}}')
+
+  local result
+  result=$(_api POST blocks -d "$payload")
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "ok"
+  fi
+}
+
+cmd_update() {
+  local block_id="" json_flag=false content=""
+  if [[ ! -t 0 ]]; then
+    content=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) block_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$block_id" ]]; then
+    echo "usage: craft update <blockId> < content.md" >&2
+    return 1
+  fi
+
+  if [[ -z "$content" ]]; then
+    echo "error: no content on stdin" >&2
+    return 1
+  fi
+
+  local payload
+  payload=$(jq -n --arg md "$content" --arg id "$block_id" \
+    '{blocks: [{id: $id, markdown: $md}]}')
+
+  local result
+  result=$(_api PUT blocks -d "$payload")
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "ok"
+  fi
+}
+
+cmd_delete() {
+  local doc_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft delete <docId>" >&2
+    return 1
+  fi
+
+  _api DELETE documents -d "{\"documentIds\": [\"$doc_id\"]}" | jq -r '.items[]' 2>/dev/null
+  echo "ok (moved to trash)"
+}
+
+cmd_open() {
+  local doc_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft open <docId>" >&2
+    return 1
+  fi
+
+  # Get space ID from connection info
+  local space_id
+  space_id=$(_api GET connection | jq -r '.space.id')
+  open "craftdocs://open?spaceId=$space_id&blockId=$doc_id"
+}
+
+cmd_tasks() {
+  local scope="active" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --scope|-s) scope="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local data
+  data=$(_api GET "tasks?scope=$scope")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] | "\(.id)  [\(.taskInfo.state // "todo")]  \(.markdown // "")"'
+}
+
+cmd_help() {
+  cat <<'EOF'
+craft — Craft.do workspace CLI
+
+Read:
+  craft folders                           List folder tree
+  craft docs [--folder NAME|ID]           List documents
+  craft search "query" [--folder NAME]    Search across all docs
+  craft read <docId>                      Read doc as markdown
+  craft today                             Read today's daily note
+  craft tasks [--scope active|inbox]      List tasks
+
+Write:
+  craft create "title" [--folder NAME]    Create doc (stdin for content)
+  craft append <docId>                    Append to doc (stdin)
+  craft update <blockId>                  Update block (stdin)
+  craft delete <docId>                    Move doc to trash
+
+Other:
+  craft open <docId>                      Open in Craft app
+
+Flags:
+  --json, -j                              Raw JSON output
+  --folder, -f NAME|ID                    Filter by folder
+EOF
+}
+
+# --- dispatch ---
+
+cmd="${1:-help}"; shift || true
+
+case "$cmd" in
+  folders)  cmd_folders "$@" ;;
+  docs)     cmd_docs "$@" ;;
+  search)   cmd_search "$@" ;;
+  read)     cmd_read "$@" ;;
+  today)    cmd_today "$@" ;;
+  create)   cmd_create "$@" ;;
+  append)   cmd_append "$@" ;;
+  update)   cmd_update "$@" ;;
+  delete)   cmd_delete "$@" ;;
+  open)     cmd_open "$@" ;;
+  tasks)    cmd_tasks "$@" ;;
+  help|--help|-h) cmd_help ;;
+  *)
+    echo "error: unknown command '$cmd'" >&2
+    echo "run 'craft help' for usage" >&2
+    exit 1
+    ;;
+esac
