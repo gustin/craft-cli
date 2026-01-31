@@ -1,0 +1,7 @@
+{
+  "name": "craft",
+  "description": "Craft.do workspace CLI for Claude Code",
+  "version": "0.3.0",
+  "author": { "name": "gustin" },
+  "repository": "https://github.com/gustin/craft-cli"
+}

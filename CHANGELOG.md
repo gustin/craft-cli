@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Package as Claude Code plugin with workspace, authoring, and render skills
+- SessionStart hook adds CLI to PATH via CLAUDE_ENV_FILE
+- Surface API errors on body writes in `craft create`
+- Corrected rich formatting color reference for Craft REST API
+
 ## 0.3.0
 
 - Render mermaid diagrams from `.mmd` files to ASCII and SVG

@@ -127,6 +127,16 @@ craft search "auth" --json | claude "which docs discuss OAuth?"
 
 All commands accept `--json` for raw API output. Date filters accept ISO dates (`2026-01-28`) or relative values (`today`, `yesterday`, `tomorrow`).
 
+## Claude Code Plugin
+
+Install as a Claude Code plugin to use craft across any project:
+
+```bash
+claude --plugin-dir /path/to/craft-cli
+```
+
+The plugin provides skills that let Claude automatically browse, read, write, and render Craft docs. Set `CRAFT_API_KEY` and `CRAFT_API_BASE` in your shell environment.
+
 ## Requirements
 
 - bash, curl, jq, node 24+

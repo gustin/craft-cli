@@ -339,7 +339,11 @@ cmd_create() {
     local payload
     payload=$(jq -n --arg md "$content" --arg id "$doc_id" \
       '{markdown: $md, position: {position: "end", pageId: $id}}')
-    _api POST blocks -d "$payload" > /dev/null
+    local block_result
+    block_result=$(_api POST blocks -d "$payload")
+    if echo "$block_result" | jq -e '.error' > /dev/null 2>&1; then
+      echo "warning: body write failed: $(echo "$block_result" | jq -r '.error')" >&2
+    fi
   fi
 
   if $json_flag; then
