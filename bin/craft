@@ -401,6 +401,46 @@ cmd_delete() {
   echo "ok (moved to trash)"
 }
 
+cmd_mv() {
+  local doc_id="" dest="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *)
+        if [[ -z "$doc_id" ]]; then
+          doc_id="$1"
+        else
+          dest="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" || -z "$dest" ]]; then
+    echo "usage: craft mv <docId> <FOLDER|unsorted>" >&2
+    return 1
+  fi
+
+  local dest_json
+  if [[ "$dest" == "unsorted" ]]; then
+    dest_json="{\"destination\": \"unsorted\"}"
+  else
+    local folder_id
+    folder_id=$(_resolve_folder "$dest")
+    dest_json="{\"destination\": {\"folderId\": \"$folder_id\"}}"
+  fi
+
+  local result
+  result=$(_api PUT documents/move -d "{\"documentIds\": [\"$doc_id\"], $dest_json}")
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "ok"
+  fi
+}
+
 cmd_recent() {
   local limit="10" folder="" json_flag=false
   while [[ $# -gt 0 ]]; do
@@ -633,6 +673,7 @@ Write:
   craft append <docId>                    Append to doc (stdin)
   craft update <blockId>                  Update block (stdin)
   craft upload <docId>                    Upload file/image (stdin)
+  craft mv <docId> <FOLDER|unsorted>      Move doc to folder
   craft delete <docId>                    Move doc to trash
 
 Folders:
@@ -667,6 +708,7 @@ case "$cmd" in
   append)   cmd_append "$@" ;;
   update)   cmd_update "$@" ;;
   upload)   cmd_upload "$@" ;;
+  mv)       cmd_mv "$@" ;;
   delete)   cmd_delete "$@" ;;
   mkdir)    cmd_mkdir "$@" ;;
   mvfolder) cmd_mvfolder "$@" ;;

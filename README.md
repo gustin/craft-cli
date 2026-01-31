@@ -42,6 +42,7 @@ Write:
   craft append <docId>                    # append to doc (stdin)
   craft update <blockId>                  # update block (stdin)
   craft upload <docId>                    # upload file/image (stdin)
+  craft mv <docId> Product                # move doc to folder
   craft delete <docId>                    # move doc to trash
 
 Folders:
