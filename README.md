@@ -34,6 +34,7 @@ Browse:
   craft search "ontology"                 # full-text search
   craft read <docId>                      # read doc as markdown
   craft read <docId> --meta               # include timestamps
+  craft grep "pattern" <docId>            # search blocks within a doc
   craft today                             # today's daily note
   craft tasks                             # list active tasks
 
@@ -44,6 +45,10 @@ Write:
   craft upload <docId>                    # upload file/image (stdin)
   craft mv <docId> Product                # move doc to folder
   craft delete <docId>                    # move doc to trash
+
+Blocks:
+  craft rmblock <blockId>                 # delete blocks
+  craft mvblock <blockId> --to <docId>    # move blocks to another doc
 
 Folders:
   craft mkdir "name" --parent Product     # create folder

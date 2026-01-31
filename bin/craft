@@ -630,6 +630,99 @@ cmd_rmfolder() {
   echo "ok (docs moved to parent)"
 }
 
+# --- block-level commands ---
+
+cmd_grep() {
+  local doc_id="" pattern="" json_flag=false context=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -C) context="$2"; shift 2 ;;
+      -*) shift ;;
+      *)
+        if [[ -z "$pattern" ]]; then
+          pattern="$1"
+        else
+          doc_id="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$pattern" || -z "$doc_id" ]]; then
+    echo "usage: craft grep \"pattern\" <docId> [-C N]" >&2
+    return 1
+  fi
+
+  local params="blockId=$doc_id&pattern=$(_urlencode "$pattern")"
+  if [[ -n "$context" ]]; then
+    params="${params}&beforeBlockCount=$context&afterBlockCount=$context"
+  fi
+
+  local data
+  data=$(_api GET "blocks/search?$params")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] |
+    (if .beforeBlocks then .beforeBlocks[] | "  \(.markdown // "")" else empty end),
+    "> \(.markdown // "")",
+    (if .afterBlocks then .afterBlocks[] | "  \(.markdown // "")" else empty end),
+    "---"'
+}
+
+cmd_rmblock() {
+  local block_ids=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *) block_ids+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ ${#block_ids[@]} -eq 0 ]]; then
+    echo "usage: craft rmblock <blockId> [blockId...]" >&2
+    return 1
+  fi
+
+  local ids_json
+  ids_json=$(printf '%s\n' "${block_ids[@]}" | jq -R . | jq -s .)
+
+  local result
+  result=$(_api DELETE blocks -d "{\"blockIds\": $ids_json}")
+  echo "$result" | jq -r '.items[].id' 2>/dev/null
+  echo "ok"
+}
+
+cmd_mvblock() {
+  local block_ids=() dest_doc="" position="end"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --to) dest_doc="$2"; shift 2 ;;
+      --position|-p) position="$2"; shift 2 ;;
+      -*) shift ;;
+      *) block_ids+=("$1"); shift ;;
+    esac
+  done
+
+  if [[ ${#block_ids[@]} -eq 0 || -z "$dest_doc" ]]; then
+    echo "usage: craft mvblock <blockId>... --to <docId>" >&2
+    return 1
+  fi
+
+  local ids_json
+  ids_json=$(printf '%s\n' "${block_ids[@]}" | jq -R . | jq -s .)
+
+  local result
+  result=$(_api PUT blocks/move -d "$(jq -n --argjson ids "$ids_json" --arg doc "$dest_doc" --arg pos "$position" \
+    '{blockIds: $ids, position: {position: $pos, pageId: $doc}}')")
+  echo "$result" | jq -r '.items[].id' 2>/dev/null
+  echo "ok"
+}
+
 cmd_tasks() {
   local scope="active" json_flag=false
   while [[ $# -gt 0 ]]; do
@@ -665,6 +758,7 @@ Read:
   craft search "query" [--folder NAME]    Search across all docs
         [--since DATE] [--until DATE]       Filter by modified date
   craft read <docId> [--meta]             Read doc as markdown (--meta for timestamps)
+  craft grep "pattern" <docId> [-C N]     Search blocks within a doc
   craft today                             Read today's daily note
   craft tasks [--scope active|inbox]      List tasks
 
@@ -675,6 +769,10 @@ Write:
   craft upload <docId>                    Upload file/image (stdin)
   craft mv <docId> <FOLDER|unsorted>      Move doc to folder
   craft delete <docId>                    Move doc to trash
+
+Blocks:
+  craft rmblock <blockId> [blockId...]    Delete blocks
+  craft mvblock <blockId>... --to <docId> Move blocks to another doc
 
 Folders:
   craft mkdir "name" [--parent FOLDER]    Create folder
@@ -703,6 +801,7 @@ case "$cmd" in
   docs)     cmd_docs "$@" ;;
   search)   cmd_search "$@" ;;
   read)     cmd_read "$@" ;;
+  grep)     cmd_grep "$@" ;;
   today)    cmd_today "$@" ;;
   create)   cmd_create "$@" ;;
   append)   cmd_append "$@" ;;
@@ -710,6 +809,8 @@ case "$cmd" in
   upload)   cmd_upload "$@" ;;
   mv)       cmd_mv "$@" ;;
   delete)   cmd_delete "$@" ;;
+  rmblock)  cmd_rmblock "$@" ;;
+  mvblock)  cmd_mvblock "$@" ;;
   mkdir)    cmd_mkdir "$@" ;;
   mvfolder) cmd_mvfolder "$@" ;;
   rmfolder) cmd_rmfolder "$@" ;;
