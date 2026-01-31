@@ -31,6 +31,19 @@ _api_md() {
     "$@" "${CRAFT_API_BASE}/${path}"
 }
 
+_api_upload() {
+  local path="$1" content_type="$2"; shift 2
+  curl -s -X POST \
+    -H "Authorization: Bearer $CRAFT_API_KEY" \
+    -H "Content-Type: $content_type" \
+    --data-binary @- \
+    "${CRAFT_API_BASE}/${path}"
+}
+
+_space_id() {
+  _api GET connection | jq -r '.space.id'
+}
+
 _jq() { jq "$@"; }
 
 _urlencode() {
@@ -101,38 +114,65 @@ cmd_folders() {
 }
 
 cmd_docs() {
-  local folder="" json_flag=false
+  local folder="" json_flag=false sort_flag="" since="" until="" limit=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --folder|-f) folder="$2"; shift 2 ;;
+      --sort|-s) sort_flag="$2"; shift 2 ;;
+      --since) since="$2"; shift 2 ;;
+      --until) until="$2"; shift 2 ;;
+      --limit|-n) limit="$2"; shift 2 ;;
       --json|-j) json_flag=true; shift ;;
       *) shift ;;
     esac
   done
 
-  local params=""
+  local params="fetchMetadata=true"
   if [[ -n "$folder" ]]; then
     local folder_id
     folder_id=$(_resolve_folder "$folder")
-    params="folderId=$folder_id"
+    params="${params}&folderId=$folder_id"
+  fi
+  if [[ -n "$since" ]]; then
+    params="${params}&lastModifiedDateGte=$since"
+  fi
+  if [[ -n "$until" ]]; then
+    params="${params}&lastModifiedDateLte=$until"
   fi
 
   local data
-  data=$(_api GET "documents${params:+?$params}")
+  data=$(_api GET "documents?$params")
 
   if $json_flag; then
     echo "$data" | _jq .
     return
   fi
 
-  echo "$data" | jq -r '.items[] | "\(.id)  \(.title)"'
+  local limit_expr="."
+  if [[ -n "$limit" ]]; then
+    limit_expr=".[:$limit]"
+  fi
+
+  case "$sort_flag" in
+    modified|updated|recent)
+      echo "$data" | jq -r --argjson n "${limit:-0}" '.items | sort_by(.lastModifiedAt) | reverse | if $n > 0 then .[:$n] else . end | .[] | "\(.lastModifiedAt // "" | .[:10])  \(.id)  \(.title)"'
+      ;;
+    created)
+      echo "$data" | jq -r --argjson n "${limit:-0}" '.items | sort_by(.createdAt) | reverse | if $n > 0 then .[:$n] else . end | .[] | "\(.createdAt // "" | .[:10])  \(.id)  \(.title)"'
+      ;;
+    *)
+      echo "$data" | jq -r --argjson n "${limit:-0}" '.items | if $n > 0 then .[:$n] else . end | .[] | "\(.id)  \(.title)"'
+      ;;
+  esac
 }
 
 cmd_search() {
-  local query="" folder="" json_flag=false
+  local query="" folder="" json_flag=false since="" until=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --folder|-f) folder="$2"; shift 2 ;;
+      --since) since="$2"; shift 2 ;;
+      --until) until="$2"; shift 2 ;;
       --json|-j) json_flag=true; shift ;;
       -*) shift ;;
       *) query="$1"; shift ;;
@@ -140,7 +180,7 @@ cmd_search() {
   done
 
   if [[ -z "$query" ]]; then
-    echo "usage: craft search \"query\" [--folder NAME]" >&2
+    echo "usage: craft search \"query\" [--folder NAME] [--since DATE]" >&2
     return 1
   fi
 
@@ -149,6 +189,12 @@ cmd_search() {
     local folder_id
     folder_id=$(_resolve_folder "$folder")
     params="${params}&folderIds=$folder_id"
+  fi
+  if [[ -n "$since" ]]; then
+    params="${params}&lastModifiedDateGte=$since"
+  fi
+  if [[ -n "$until" ]]; then
+    params="${params}&lastModifiedDateLte=$until"
   fi
 
   local data
@@ -163,22 +209,28 @@ cmd_search() {
 }
 
 cmd_read() {
-  local doc_id="" json_flag=false
+  local doc_id="" json_flag=false meta_flag=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --json|-j) json_flag=true; shift ;;
+      --meta|-m) meta_flag=true; shift ;;
       -*) shift ;;
       *) doc_id="$1"; shift ;;
     esac
   done
 
   if [[ -z "$doc_id" ]]; then
-    echo "usage: craft read <docId>" >&2
+    echo "usage: craft read <docId> [--meta]" >&2
     return 1
   fi
 
   if $json_flag; then
-    _api GET "blocks?id=$doc_id" | _jq .
+    _api GET "blocks?id=$doc_id&fetchMetadata=true" | _jq .
+  elif $meta_flag; then
+    local meta
+    meta=$(_api GET "documents?fetchMetadata=true")
+    echo "$meta" | jq -r --arg id "$doc_id" '.items[] | select(.id == $id) | "title: \(.title // .id)", "created: \(.createdAt // "unknown")", "modified: \(.lastModifiedAt // "unknown")", ""'
+    _api_md "blocks?id=$doc_id"
   else
     _api_md "blocks?id=$doc_id"
   fi
@@ -349,6 +401,75 @@ cmd_delete() {
   echo "ok (moved to trash)"
 }
 
+cmd_recent() {
+  local limit="10" folder="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --folder|-f) folder="$2"; shift 2 ;;
+      --limit|-n) limit="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local args=(--sort modified --limit "$limit")
+  if [[ -n "$folder" ]]; then
+    args+=(--folder "$folder")
+  fi
+  if $json_flag; then
+    args+=(--json)
+  fi
+  cmd_docs "${args[@]}"
+}
+
+cmd_upload() {
+  local doc_id="" position="end" content=""
+  if [[ ! -t 0 ]]; then
+    content=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --position|-p) position="$2"; shift 2 ;;
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft upload <docId> < file.svg" >&2
+    return 1
+  fi
+
+  if [[ -z "$content" ]]; then
+    echo "error: no content on stdin" >&2
+    return 1
+  fi
+
+  local result
+  result=$(echo "$content" | _api_upload "upload?position=$position&pageId=$doc_id" "application/octet-stream")
+  echo "$result" | jq -r '"uploaded: \(.blockId)  \(.assetUrl // "")"'
+}
+
+cmd_link() {
+  local doc_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *) doc_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$doc_id" ]]; then
+    echo "usage: craft link <docId>" >&2
+    return 1
+  fi
+
+  local space_id
+  space_id=$(_space_id)
+  echo "craftdocs://open?spaceId=$space_id&blockId=$doc_id"
+}
+
 cmd_open() {
   local doc_id=""
   while [[ $# -gt 0 ]]; do
@@ -363,10 +484,110 @@ cmd_open() {
     return 1
   fi
 
-  # Get space ID from connection info
   local space_id
-  space_id=$(_api GET connection | jq -r '.space.id')
+  space_id=$(_space_id)
   open "craftdocs://open?spaceId=$space_id&blockId=$doc_id"
+}
+
+cmd_mkdir() {
+  local name="" parent="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --parent|-p) parent="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) name="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$name" ]]; then
+    echo "usage: craft mkdir \"name\" [--parent FOLDER]" >&2
+    return 1
+  fi
+
+  local dest=""
+  if [[ -n "$parent" ]]; then
+    local parent_id
+    parent_id=$(_resolve_folder "$parent")
+    dest=", \"destination\": {\"parentFolderId\": \"$parent_id\"}"
+  fi
+
+  local result
+  result=$(_api POST folders -d "{\"folders\": [{\"name\": \"$name\"}]$dest}")
+  # Invalidate folder cache
+  rm -f "$FOLDER_CACHE"
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "$result" | jq -r '.items[0] | "\(.id)  \(.name)"'
+  fi
+}
+
+cmd_mvfolder() {
+  local folder="" dest="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *)
+        if [[ -z "$folder" ]]; then
+          folder="$1"
+        else
+          dest="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$folder" || -z "$dest" ]]; then
+    echo "usage: craft mvfolder <FOLDER> <DEST_FOLDER|root>" >&2
+    return 1
+  fi
+
+  local folder_id
+  folder_id=$(_resolve_folder "$folder")
+
+  local dest_json
+  if [[ "$dest" == "root" ]]; then
+    dest_json="{\"destination\": \"root\"}"
+  else
+    local dest_id
+    dest_id=$(_resolve_folder "$dest")
+    dest_json="{\"destination\": {\"parentFolderId\": \"$dest_id\"}}"
+  fi
+
+  local result
+  result=$(_api PUT folders/move -d "{\"folderIds\": [\"$folder_id\"], $dest_json}")
+  rm -f "$FOLDER_CACHE"
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "ok"
+  fi
+}
+
+cmd_rmfolder() {
+  local folder=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *) folder="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$folder" ]]; then
+    echo "usage: craft rmfolder <FOLDER>" >&2
+    return 1
+  fi
+
+  local folder_id
+  folder_id=$(_resolve_folder "$folder")
+
+  _api DELETE folders -d "{\"folderIds\": [\"$folder_id\"]}" | jq -r '.items[]' 2>/dev/null
+  rm -f "$FOLDER_CACHE"
+  echo "ok (docs moved to parent)"
 }
 
 cmd_tasks() {
@@ -396,9 +617,14 @@ craft — Craft.do workspace CLI
 
 Read:
   craft folders                           List folder tree
+  craft recent [--limit N] [--folder F]   Recently modified docs (default 10)
   craft docs [--folder NAME|ID]           List documents
+        [--sort modified|created]           Sort by date (newest first)
+        [--since DATE] [--until DATE]       Filter by modified date
+        [--limit N]                         Limit results
   craft search "query" [--folder NAME]    Search across all docs
-  craft read <docId>                      Read doc as markdown
+        [--since DATE] [--until DATE]       Filter by modified date
+  craft read <docId> [--meta]             Read doc as markdown (--meta for timestamps)
   craft today                             Read today's daily note
   craft tasks [--scope active|inbox]      List tasks
 
@@ -406,14 +632,23 @@ Write:
   craft create "title" [--folder NAME]    Create doc (stdin for content)
   craft append <docId>                    Append to doc (stdin)
   craft update <blockId>                  Update block (stdin)
+  craft upload <docId>                    Upload file/image (stdin)
   craft delete <docId>                    Move doc to trash
+
+Folders:
+  craft mkdir "name" [--parent FOLDER]    Create folder
+  craft mvfolder <FOLDER> <DEST|root>     Move folder
+  craft rmfolder <FOLDER>                 Delete folder (docs go to parent)
 
 Other:
   craft open <docId>                      Open in Craft app
+  craft link <docId>                      Print deep link URL
 
 Flags:
   --json, -j                              Raw JSON output
   --folder, -f NAME|ID                    Filter by folder
+
+Dates: ISO (2026-01-28) or relative (today, yesterday, tomorrow)
 EOF
 }
 
@@ -423,6 +658,7 @@ cmd="${1:-help}"; shift || true
 
 case "$cmd" in
   folders)  cmd_folders "$@" ;;
+  recent)   cmd_recent "$@" ;;
   docs)     cmd_docs "$@" ;;
   search)   cmd_search "$@" ;;
   read)     cmd_read "$@" ;;
@@ -430,8 +666,13 @@ case "$cmd" in
   create)   cmd_create "$@" ;;
   append)   cmd_append "$@" ;;
   update)   cmd_update "$@" ;;
+  upload)   cmd_upload "$@" ;;
   delete)   cmd_delete "$@" ;;
+  mkdir)    cmd_mkdir "$@" ;;
+  mvfolder) cmd_mvfolder "$@" ;;
+  rmfolder) cmd_rmfolder "$@" ;;
   open)     cmd_open "$@" ;;
+  link)     cmd_link "$@" ;;
   tasks)    cmd_tasks "$@" ;;
   help|--help|-h) cmd_help ;;
   *)
