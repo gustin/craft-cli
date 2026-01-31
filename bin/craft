@@ -723,6 +723,201 @@ cmd_mvblock() {
   echo "ok"
 }
 
+# --- collection commands ---
+
+cmd_collections() {
+  local doc_id="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --doc|-d) doc_id="$2"; shift 2 ;;
+      --json|-j) json_flag=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local params=""
+  if [[ -n "$doc_id" ]]; then
+    params="?documentIds=$doc_id"
+  fi
+
+  local data
+  data=$(_api GET "collections$params")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] | "\(.id)  \(.name) (\(.itemCount) items)  doc:\(.documentId)"'
+}
+
+cmd_collection_schema() {
+  local col_id="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) col_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$col_id" ]]; then
+    echo "usage: craft collection:schema <collectionId>" >&2
+    return 1
+  fi
+
+  local data
+  data=$(_api GET "collections/$col_id/schema?format=schema")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '
+    "Collection: \(.name)",
+    "Content field: \(.contentPropDetails.name)",
+    "",
+    "Properties:",
+    (.properties[] | "  \(.name) (\(.type))\(if .options then " = " + (.options | join(", ")) else "" end)")
+  '
+}
+
+cmd_collection_items() {
+  local col_id="" json_flag=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *) col_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$col_id" ]]; then
+    echo "usage: craft collection:items <collectionId>" >&2
+    return 1
+  fi
+
+  local data
+  data=$(_api GET "collections/$col_id/items?maxDepth=0")
+
+  if $json_flag; then
+    echo "$data" | _jq .
+    return
+  fi
+
+  echo "$data" | jq -r '.items[] | "\(.id)  \(.title)  \(.properties // {} | to_entries | map("\(.key)=\(.value)") | join("  "))"'
+}
+
+cmd_collection_add() {
+  local col_id="" title="" json_flag=false props=""
+  if [[ ! -t 0 ]]; then
+    props=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *)
+        if [[ -z "$col_id" ]]; then
+          col_id="$1"
+        else
+          title="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$col_id" || -z "$title" ]]; then
+    echo "usage: craft collection:add <collectionId> \"title\" [< props.json]" >&2
+    return 1
+  fi
+
+  local payload
+  if [[ -n "$props" ]]; then
+    payload=$(jq -n --arg t "$title" --argjson p "$props" '{items: [{title: $t, properties: $p}]}')
+  else
+    payload=$(jq -n --arg t "$title" '{items: [{title: $t}]}')
+  fi
+
+  local result
+  result=$(_api POST "collections/$col_id/items" -d "$payload")
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "$result" | jq -r '.items[0] | "\(.id)  \(.title)"'
+  fi
+}
+
+cmd_collection_update() {
+  local col_id="" item_id="" json_flag=false props=""
+  if [[ ! -t 0 ]]; then
+    props=$(cat)
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json|-j) json_flag=true; shift ;;
+      -*) shift ;;
+      *)
+        if [[ -z "$col_id" ]]; then
+          col_id="$1"
+        elif [[ -z "$item_id" ]]; then
+          item_id="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$col_id" || -z "$item_id" || -z "$props" ]]; then
+    echo "usage: craft collection:update <collectionId> <itemId> < props.json" >&2
+    return 1
+  fi
+
+  local payload
+  payload=$(jq -n --arg id "$item_id" --argjson p "$props" '{itemsToUpdate: [{id: $id, properties: $p}]}')
+
+  local result
+  result=$(_api PUT "collections/$col_id/items" -d "$payload")
+
+  if $json_flag; then
+    echo "$result" | _jq .
+  else
+    echo "ok"
+  fi
+}
+
+cmd_collection_rm() {
+  local col_id="" item_ids=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) shift ;;
+      *)
+        if [[ -z "$col_id" ]]; then
+          col_id="$1"
+        else
+          item_ids+=("$1")
+        fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$col_id" || ${#item_ids[@]} -eq 0 ]]; then
+    echo "usage: craft collection:rm <collectionId> <itemId> [itemId...]" >&2
+    return 1
+  fi
+
+  local ids_json
+  ids_json=$(printf '%s\n' "${item_ids[@]}" | jq -R . | jq -s .)
+
+  _api DELETE "collections/$col_id/items" -d "{\"idsToDelete\": $ids_json}" | jq -r '.items[]' 2>/dev/null
+  echo "ok"
+}
+
+# --- tasks and other ---
+
 cmd_tasks() {
   local scope="active" json_flag=false
   while [[ $# -gt 0 ]]; do
@@ -779,6 +974,14 @@ Folders:
   craft mvfolder <FOLDER> <DEST|root>     Move folder
   craft rmfolder <FOLDER>                 Delete folder (docs go to parent)
 
+Collections:
+  craft collections [--doc DOC_ID]        List collections
+  craft collection:schema <collectionId>  Show collection schema
+  craft collection:items <collectionId>   List collection items
+  craft collection:add <colId> "title"    Add item (stdin for props JSON)
+  craft collection:update <colId> <itemId>  Update item (stdin for props JSON)
+  craft collection:rm <colId> <itemId>... Remove items
+
 Other:
   craft open <docId>                      Open in Craft app
   craft link <docId>                      Print deep link URL
@@ -814,6 +1017,12 @@ case "$cmd" in
   mkdir)    cmd_mkdir "$@" ;;
   mvfolder) cmd_mvfolder "$@" ;;
   rmfolder) cmd_rmfolder "$@" ;;
+  collections)        cmd_collections "$@" ;;
+  collection:schema)  cmd_collection_schema "$@" ;;
+  collection:items)   cmd_collection_items "$@" ;;
+  collection:add)     cmd_collection_add "$@" ;;
+  collection:update)  cmd_collection_update "$@" ;;
+  collection:rm)      cmd_collection_rm "$@" ;;
   open)     cmd_open "$@" ;;
   link)     cmd_link "$@" ;;
   tasks)    cmd_tasks "$@" ;;

@@ -50,6 +50,14 @@ Blocks:
   craft rmblock <blockId>                 # delete blocks
   craft mvblock <blockId> --to <docId>    # move blocks to another doc
 
+Collections:
+  craft collections                       # list collections
+  craft collection:schema <colId>         # show collection schema
+  craft collection:items <colId>          # list items
+  craft collection:add <colId> "title"    # add item (stdin for props JSON)
+  craft collection:update <colId> <itemId>  # update item (stdin for props JSON)
+  craft collection:rm <colId> <itemId>    # remove items
+
 Folders:
   craft mkdir "name" --parent Product     # create folder
   craft mvfolder "Old" "New"              # move folder
