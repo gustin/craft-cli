@@ -30,7 +30,9 @@ Follow Tim Pope's commit message guide (https://tbaggery.com/2008/04/19/a-note-a
 - Body: Wrap at 72 chars, explain what and why
 - Attribute commits to the human developer (no Claude references or co-author tags)
 - Keep commits focused on what was accomplished
-- Vary your verbs (Add, Implement, Create, Build, Introduce, Establish)
+- Lead with a verb specific to what the commit actually does, not generic actions
+- Good: "Render mermaid diagrams", "Parse .mmd marker syntax", "Stream blocks to stdout"
+- Bad: "Add render command", "Implement mermaid support", "Create new feature"
 
 Stage files and create commits only when explicitly requested. Push to remote only when explicitly approved.
 

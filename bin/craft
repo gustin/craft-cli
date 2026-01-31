@@ -86,6 +86,48 @@ _resolve_folder() {
   echo "$id"
 }
 
+# --- mermaid helpers ---
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RENDER_JS="$SCRIPT_DIR/../lib/render-mermaid.js"
+
+_split_mmd() {
+  local file="$1" tmpdir="$2"
+  local name=""
+  local outfile=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^%%\ diagram:(.+)$ ]]; then
+      name="${BASH_REMATCH[1]}"
+      name="${name## }"
+      name="${name%% }"
+      outfile="$tmpdir/$name.mmd"
+      > "$outfile"
+    elif [[ -n "$outfile" ]]; then
+      echo "$line" >> "$outfile"
+    fi
+  done < "$file"
+}
+
+_inject_ascii() {
+  local md_file="$1" name="$2" ascii_file="$3"
+  local marker="<!-- mermaid:$name -->"
+  awk -v marker="$marker" -v file="$ascii_file" '
+    BEGIN { skip = 0 }
+    $0 == marker {
+      print
+      print "```"
+      while ((getline line < file) > 0) print line
+      close(file)
+      print "```"
+      skip = 1
+      next
+    }
+    skip && /^<!-- mermaid:/ { skip = 0 }
+    skip && /^#/ { skip = 0 }
+    !skip { print }
+  ' "$md_file" > "$md_file.tmp" && mv "$md_file.tmp" "$md_file"
+}
+
 # --- commands ---
 
 cmd_folders() {
@@ -939,6 +981,93 @@ cmd_tasks() {
   echo "$data" | jq -r '.items[] | "\(.id)  [\(.taskInfo.state // "todo")]  \(.markdown // "")"'
 }
 
+cmd_render() {
+  local mmd_file="" doc_id="" local_only=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --doc|-d) doc_id="$2"; shift 2 ;;
+      --local-only|-l) local_only=true; shift ;;
+      -*) shift ;;
+      *) mmd_file="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$mmd_file" ]]; then
+    echo "usage: craft render <file.mmd> [--doc DOC_ID] [--local-only]" >&2
+    return 1
+  fi
+
+  if [[ ! -f "$mmd_file" ]]; then
+    echo "error: file not found: $mmd_file" >&2
+    return 1
+  fi
+
+  if ! $local_only && [[ -z "$doc_id" ]]; then
+    echo "error: --doc required unless --local-only" >&2
+    return 1
+  fi
+
+  local md_file="${mmd_file%.mmd}.md"
+  if [[ ! -f "$md_file" ]]; then
+    echo "error: markdown file not found: $md_file" >&2
+    return 1
+  fi
+
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" EXIT
+
+  _split_mmd "$mmd_file" "$tmpdir"
+
+  local count=0
+  for diagram in "$tmpdir"/*.mmd; do
+    [[ -f "$diagram" ]] || continue
+    local name
+    name=$(basename "$diagram" .mmd)
+
+    # Render ASCII and inject into markdown
+    local ascii_file="$tmpdir/$name.txt"
+    node "$RENDER_JS" ascii < "$diagram" > "$ascii_file"
+    _inject_ascii "$md_file" "$name" "$ascii_file"
+    echo "ascii: $name"
+
+    # Upload SVG to Craft doc
+    if ! $local_only; then
+      local svg
+      svg=$(node "$RENDER_JS" svg < "$diagram")
+
+      # Search for mermaid marker block in doc
+      local search_result
+      search_result=$(_api GET "blocks/search?blockId=$doc_id&pattern=$(_urlencode "mermaid:$name")&afterBlockCount=1")
+
+      local marker_block_id
+      marker_block_id=$(echo "$search_result" | jq -r '.items[0].id // empty')
+
+      if [[ -z "$marker_block_id" ]]; then
+        echo "warn: marker 'mermaid:$name' not found in doc, skipping SVG upload" >&2
+        continue
+      fi
+
+      # Check if the block after marker is an image, delete it if so
+      local after_type
+      after_type=$(echo "$search_result" | jq -r '.items[0].afterBlocks[0].type // empty')
+      if [[ "$after_type" == "image" ]]; then
+        local after_id
+        after_id=$(echo "$search_result" | jq -r '.items[0].afterBlocks[0].id')
+        _api DELETE blocks -d "{\"blockIds\": [\"$after_id\"]}" > /dev/null
+      fi
+
+      # Upload SVG after marker block
+      echo "$svg" | _api_upload "upload?position=after&siblingId=$marker_block_id" "image/svg+xml" > /dev/null
+      echo "svg:   $name"
+    fi
+
+    count=$((count + 1))
+  done
+
+  echo "rendered $count diagram(s)"
+}
+
 cmd_help() {
   cat <<'EOF'
 craft — Craft.do workspace CLI
@@ -982,6 +1111,10 @@ Collections:
   craft collection:update <colId> <itemId>  Update item (stdin for props JSON)
   craft collection:rm <colId> <itemId>... Remove items
 
+Render:
+  craft render <file.mmd> [--doc DOC_ID]  Render mermaid to ASCII + SVG
+        [--local-only]                      Skip Craft upload, ASCII only
+
 Other:
   craft open <docId>                      Open in Craft app
   craft link <docId>                      Print deep link URL
@@ -1023,6 +1156,7 @@ case "$cmd" in
   collection:add)     cmd_collection_add "$@" ;;
   collection:update)  cmd_collection_update "$@" ;;
   collection:rm)      cmd_collection_rm "$@" ;;
+  render)   cmd_render "$@" ;;
   open)     cmd_open "$@" ;;
   link)     cmd_link "$@" ;;
   tasks)    cmd_tasks "$@" ;;

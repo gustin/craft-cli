@@ -7,8 +7,9 @@ CLI for the Craft.do workspace API. Read, write, and manage docs from the termin
 ```bash
 git clone https://github.com/gustin/craft-cli.git
 cd craft-cli
-mise install   # installs jq
+mise install
 mise trust
+npm install
 ```
 
 ## Setup
@@ -25,62 +26,110 @@ Get these from Craft Settings > API Connections.
 
 ## Usage
 
+### Browse
+
+List folders, search docs, read content.
+
 ```bash
-Browse:
-  craft folders                           # list folder tree
-  craft recent                            # 10 most recently modified docs
-  craft docs --folder Business            # list docs in a folder
-  craft docs --sort modified --since today  # docs modified today
-  craft search "ontology"                 # full-text search
-  craft read <docId>                      # read doc as markdown
-  craft read <docId> --meta               # include timestamps
-  craft grep "pattern" <docId>            # search blocks within a doc
-  craft today                             # today's daily note
-  craft tasks                             # list active tasks
-
-Write:
-  craft create "title" --folder Product   # create doc (pipe content via stdin)
-  craft append <docId>                    # append to doc (stdin)
-  craft update <blockId>                  # update block (stdin)
-  craft upload <docId>                    # upload file/image (stdin)
-  craft mv <docId> Product                # move doc to folder
-  craft delete <docId>                    # move doc to trash
-
-Blocks:
-  craft rmblock <blockId>                 # delete blocks
-  craft mvblock <blockId> --to <docId>    # move blocks to another doc
-
-Collections:
-  craft collections                       # list collections
-  craft collection:schema <colId>         # show collection schema
-  craft collection:items <colId>          # list items
-  craft collection:add <colId> "title"    # add item (stdin for props JSON)
-  craft collection:update <colId> <itemId>  # update item (stdin for props JSON)
-  craft collection:rm <colId> <itemId>    # remove items
-
-Folders:
-  craft mkdir "name" --parent Product     # create folder
-  craft mvfolder "Old" "New"              # move folder
-  craft rmfolder "Temp"                   # delete folder (docs go to parent)
-
-Other:
-  craft open <docId>                      # open in Craft app
-  craft link <docId>                      # print deep link URL
-  craft help                              # full usage
+craft folders
+craft recent
+craft docs --folder Business
+craft docs --sort modified --since today
+craft search "ontology"
+craft read <docId>
+craft read <docId> --meta
+craft grep "pattern" <docId>
+craft today
+craft tasks
 ```
 
-Pipe content via stdin:
+### Write
+
+Create docs, append content, upload files. Pipe content via stdin.
+
+```bash
+craft create "title" --folder Product
+craft append <docId>
+craft update <blockId>
+craft upload <docId>
+craft mv <docId> Product
+craft delete <docId>
+```
+
+### Blocks
+
+Operate on individual blocks within a doc.
+
+```bash
+craft rmblock <blockId>
+craft mvblock <blockId> --to <docId>
+```
+
+### Collections
+
+Manage structured data in Craft collections.
+
+```bash
+craft collections
+craft collection:schema <colId>
+craft collection:items <colId>
+craft collection:add <colId> "title"
+craft collection:update <colId> <itemId>
+craft collection:rm <colId> <itemId>
+```
+
+### Folders
+
+Create, move, and remove folders.
+
+```bash
+craft mkdir "name" --parent Product
+craft mvfolder "Old" "New"
+craft rmfolder "Temp"
+```
+
+### Render
+
+Render mermaid diagrams from `.mmd` source files to ASCII (local markdown) and SVG (Craft upload).
+
+```bash
+craft render docs/ontology.mmd --local-only
+craft render docs/ontology.mmd --doc <docId>
+```
+
+Source files use `%% diagram:NAME` markers to delimit diagrams. The corresponding `.md` file uses `<!-- mermaid:NAME -->` markers as injection points for rendered ASCII.
+
+### Other
+
+```bash
+craft open <docId>
+craft link <docId>
+craft help
+```
+
+### Piping
+
+Pipe content in via stdin:
 
 ```bash
 echo "# Meeting Notes" | craft create "Weekly Sync" --folder Business
 cat docs/ontology.md | craft create "Ontology" --folder Product
 ```
 
+Pipe output to Claude CLI:
+
+```bash
+craft read <docId> | claude "summarize this doc"
+craft search "auth" --json | claude "which docs discuss OAuth?"
+```
+
+### Flags
+
 All commands accept `--json` for raw API output. Date filters accept ISO dates (`2026-01-28`) or relative values (`today`, `yesterday`, `tomorrow`).
 
 ## Requirements
 
-- bash, curl, jq
+- bash, curl, jq, node 24+
 - Craft.do API connection ([docs](https://support.craft.do/hc/en-us/articles/23702897811612-Craft-API))
 
 ## License

@@ -1,5 +1,6 @@
 [tools]
 jq = "latest"
+node = "24"
 
 [env]
 _.path = ["bin"]
