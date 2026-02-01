@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Rasterize mermaid diagrams to PNG via sharp (Craft doesn't inline SVGs)
+- Themed rendering with 15 beautiful-mermaid color themes
+- Flatten CSS variables and color-mix() to static hex before rasterizing
+- Default theme: catppuccin-mocha, configurable via `--theme`
+- Fix block search API field names (.blockId not .id)
+- Retina 2x PNG output for crisp rendering
+- Marketplace.json for permanent plugin install
+
 ## 0.4.0
 
 - Package as Claude Code plugin with workspace, authoring, and render skills

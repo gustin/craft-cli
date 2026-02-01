@@ -132,14 +132,18 @@ All commands accept `--json` for raw API output. Date filters accept ISO dates (
 Install as a Claude Code plugin to use craft across any project:
 
 ```bash
-claude --plugin-dir /path/to/craft-cli
+/plugin marketplace add gustin/craft-cli
+/plugin install craft@gustin-marketplace
 ```
+
+For local development, use `claude --plugin-dir /path/to/craft-cli` instead.
 
 The plugin provides skills that let Claude automatically browse, read, write, and render Craft docs. Set `CRAFT_API_KEY` and `CRAFT_API_BASE` in your shell environment.
 
 ## Requirements
 
-- bash, curl, jq, node 24+
+- bash, curl, jq
+- node 24+ and `npm install` (for mermaid rendering)
 - Craft.do API connection ([docs](https://support.craft.do/hc/en-us/articles/23702897811612-Craft-API))
 
 ## License

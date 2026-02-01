@@ -1,0 +1,13 @@
+{
+  "name": "gustin-marketplace",
+  "owner": {
+    "name": "gustin"
+  },
+  "plugins": [
+    {
+      "name": "craft",
+      "source": "./",
+      "description": "Craft.do workspace CLI for Claude Code"
+    }
+  ]
+}
