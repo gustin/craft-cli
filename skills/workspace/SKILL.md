@@ -16,17 +16,19 @@ Start with `craft folders` to see the workspace structure, then narrow down with
 
 ## Commands
 
-Run via Bash: `craft <command>`
+The craft binary is at: `${CLAUDE_PLUGIN_ROOT}/bin/craft`
 
-- `craft folders` -- list folder tree
-- `craft docs --folder NAME` -- list docs in a folder
-- `craft recent` -- recently modified docs
-- `craft search "query"` -- full-text search
-- `craft read <docId>` -- read doc as markdown
-- `craft read <docId> --meta` -- with timestamps
-- `craft grep "pattern" <docId>` -- search blocks in a doc
-- `craft today` -- today's daily note
-- `craft tasks` -- active tasks
+Always use this full path when running craft via Bash. Do not assume `craft` is on PATH.
+
+- `folders` -- list folder tree
+- `docs --folder NAME` -- list docs in a folder
+- `recent` -- recently modified docs
+- `search "query"` -- full-text search
+- `read <docId>` -- read doc as markdown
+- `read <docId> --meta` -- with timestamps
+- `grep "pattern" <docId>` -- search blocks in a doc
+- `today` -- today's daily note
+- `tasks` -- active tasks
 
 All commands accept `--json` for raw API output.
 

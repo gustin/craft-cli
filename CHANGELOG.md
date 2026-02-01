@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Use full binary path in skills instead of assuming PATH
+- Rename marketplace to gustin-marketplace
+
 ## 0.5.0
 
 - Rasterize mermaid diagrams to PNG via sharp (Craft doesn't inline SVGs)

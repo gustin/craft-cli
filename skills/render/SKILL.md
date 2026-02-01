@@ -17,11 +17,13 @@ The `.md` file uses `<!-- mermaid:NAME -->` markers as injection points. ASCII c
 
 ## Commands
 
-Run via Bash: `craft render <file.mmd> [options]`
+The craft binary is at: `${CLAUDE_PLUGIN_ROOT}/bin/craft`
 
-- `--local-only` -- regenerate ASCII in the .md file only
-- `--doc DOC_ID` -- also upload SVGs to a Craft document
-- `--theme NAME` -- color theme (default: catppuccin-mocha). Available: zinc-dark, tokyo-night, catppuccin-mocha, nord, dracula, github-light, github-dark, solarized-light, solarized-dark, one-dark
+Always use this full path when running craft via Bash. Do not assume `craft` is on PATH.
+
+- `render <file.mmd> --local-only` -- regenerate ASCII in the .md file only
+- `render <file.mmd> --doc DOC_ID` -- also upload SVGs to a Craft document
+- `render <file.mmd> --theme NAME` -- color theme (default: catppuccin-mocha). Available: zinc-dark, tokyo-night, catppuccin-mocha, nord, dracula, github-light, github-dark, solarized-light, solarized-dark, one-dark
 
 ## Dependencies
 

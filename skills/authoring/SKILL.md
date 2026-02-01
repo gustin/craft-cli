@@ -20,17 +20,19 @@ Move docs between folders with `craft mv`, create folders with `craft mkdir`, or
 
 ## Commands
 
-Run via Bash: `craft <command>`
+The craft binary is at: `${CLAUDE_PLUGIN_ROOT}/bin/craft`
 
-- `craft create "title" --folder NAME` -- create doc (pipe content via stdin)
-- `craft append <docId>` -- append markdown to doc (stdin)
-- `craft update <blockId>` -- update a block (stdin)
-- `craft upload <docId>` -- upload file/image (stdin)
-- `craft mv <docId> <FOLDER>` -- move doc to folder
-- `craft delete <docId>` -- move doc to trash
-- `craft mkdir "name"` -- create folder
-- `craft rmblock <blockId>` -- delete blocks
-- `craft mvblock <blockId> --to <docId>` -- move blocks
+Always use this full path when running craft via Bash. Do not assume `craft` is on PATH.
+
+- `create "title" --folder NAME` -- create doc (pipe content via stdin)
+- `append <docId>` -- append markdown to doc (stdin)
+- `update <blockId>` -- update a block (stdin)
+- `upload <docId>` -- upload file/image (stdin)
+- `mv <docId> <FOLDER>` -- move doc to folder
+- `delete <docId>` -- move doc to trash
+- `mkdir "name"` -- create folder
+- `rmblock <blockId>` -- delete blocks
+- `mvblock <blockId> --to <docId>` -- move blocks
 
 ## Rich Formatting
 
