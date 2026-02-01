@@ -21,6 +21,7 @@ Run via Bash: `craft render <file.mmd> [options]`
 
 - `--local-only` -- regenerate ASCII in the .md file only
 - `--doc DOC_ID` -- also upload SVGs to a Craft document
+- `--theme NAME` -- color theme (default: catppuccin-mocha). Available: zinc-dark, tokyo-night, catppuccin-mocha, nord, dracula, github-light, github-dark, solarized-light, solarized-dark, one-dark
 
 ## Dependencies
 

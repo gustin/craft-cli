@@ -986,18 +986,19 @@ cmd_tasks() {
 }
 
 cmd_render() {
-  local mmd_file="" doc_id="" local_only=false
+  local mmd_file="" doc_id="" local_only=false theme="catppuccin-mocha"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --doc|-d) doc_id="$2"; shift 2 ;;
       --local-only|-l) local_only=true; shift ;;
+      --theme|-t) theme="$2"; shift 2 ;;
       -*) shift ;;
       *) mmd_file="$1"; shift ;;
     esac
   done
 
   if [[ -z "$mmd_file" ]]; then
-    echo "usage: craft render <file.mmd> [--doc DOC_ID] [--local-only]" >&2
+    echo "usage: craft render <file.mmd> [--doc DOC_ID] [--local-only] [--theme NAME]" >&2
     return 1
   fi
 
@@ -1031,39 +1032,42 @@ cmd_render() {
 
     # Render ASCII and inject into markdown
     local ascii_file="$tmpdir/$name.txt"
-    node "$RENDER_JS" ascii < "$diagram" > "$ascii_file"
+    node "$RENDER_JS" ascii "$theme" < "$diagram" > "$ascii_file"
     _inject_ascii "$md_file" "$name" "$ascii_file"
     echo "ascii: $name"
 
-    # Upload SVG to Craft doc
+    # Upload PNG to Craft doc
     if ! $local_only; then
-      local svg
-      svg=$(node "$RENDER_JS" svg < "$diagram")
+      local png_file="$tmpdir/$name.png"
+      node "$RENDER_JS" png "$theme" < "$diagram" > "$png_file"
 
       # Search for mermaid marker block in doc
       local search_result
       search_result=$(_api GET "blocks/search?blockId=$doc_id&pattern=$(_urlencode "mermaid:$name")&afterBlockCount=1")
 
       local marker_block_id
-      marker_block_id=$(echo "$search_result" | jq -r '.items[0].id // empty')
+      marker_block_id=$(echo "$search_result" | jq -r '.items[0].blockId // empty')
 
       if [[ -z "$marker_block_id" ]]; then
-        echo "warn: marker 'mermaid:$name' not found in doc, skipping SVG upload" >&2
+        echo "warn: marker 'mermaid:$name' not found in doc, skipping upload" >&2
         continue
       fi
 
-      # Check if the block after marker is an image, delete it if so
-      local after_type
-      after_type=$(echo "$search_result" | jq -r '.items[0].afterBlocks[0].type // empty')
-      if [[ "$after_type" == "image" ]]; then
-        local after_id
-        after_id=$(echo "$search_result" | jq -r '.items[0].afterBlocks[0].id')
-        _api DELETE blocks -d "{\"blockIds\": [\"$after_id\"]}" > /dev/null
+      # Replace existing image if the block after marker is one
+      local after_block_id
+      after_block_id=$(echo "$search_result" | jq -r '.items[0].afterBlocks[0].blockId // empty')
+      if [[ -n "$after_block_id" ]]; then
+        local after_type
+        after_type=$(_api GET "blocks?id=$doc_id" | jq -r --arg id "$after_block_id" \
+          '[.content[] | select(.id == $id)][0].type // empty')
+        if [[ "$after_type" == "image" ]]; then
+          _api DELETE blocks -d "{\"blockIds\": [\"$after_block_id\"]}" > /dev/null
+        fi
       fi
 
-      # Upload SVG after marker block
-      echo "$svg" | _api_upload "upload?position=after&siblingId=$marker_block_id" "image/svg+xml" > /dev/null
-      echo "svg:   $name"
+      # Upload PNG after marker block
+      _api_upload "upload?position=after&siblingId=$marker_block_id" "image/png" < "$png_file" > /dev/null
+      echo "png:   $name"
     fi
 
     count=$((count + 1))
