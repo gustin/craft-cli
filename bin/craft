@@ -11,6 +11,7 @@ if [[ -z "${CRAFT_API_KEY:-}" || -z "${CRAFT_API_BASE:-}" ]]; then
 fi
 
 FOLDER_CACHE="/tmp/craft-folders.json"
+DOC_FOLDER_CACHE="/tmp/craft-doc-folders.json"
 FOLDER_CACHE_TTL=300 # 5 minutes
 
 # --- core helpers ---
@@ -84,6 +85,63 @@ _resolve_folder() {
     return 1
   fi
   echo "$id"
+}
+
+# --- doc-to-folder mapping ---
+
+_refresh_doc_folder_cache() {
+  if [[ -f "$DOC_FOLDER_CACHE" ]]; then
+    local age=$(( $(date +%s) - $(stat -f%m "$DOC_FOLDER_CACHE" 2>/dev/null || echo 0) ))
+    if (( age < FOLDER_CACHE_TTL )); then
+      return
+    fi
+  fi
+  _refresh_folder_cache
+  # Walk the folder tree, list docs per folder, build docId->breadcrumb map
+  local map="{}"
+  _walk_folders() {
+    local tree="$1" path="$2"
+    local folders
+    folders=$(echo "$tree" | jq -c '.[]')
+    while IFS= read -r folder; do
+      [[ -z "$folder" ]] && continue
+      local fid fname fpath
+      fid=$(echo "$folder" | jq -r '.id')
+      fname=$(echo "$folder" | jq -r '.name')
+      if [[ -n "$path" ]]; then
+        fpath="$path > $fname"
+      else
+        fpath="$fname"
+      fi
+      # Fetch docs in this folder
+      local docs
+      docs=$(_api GET "documents?folderId=$fid" 2>/dev/null)
+      local doc_ids
+      doc_ids=$(echo "$docs" | jq -r '.items[]?.id // empty' 2>/dev/null)
+      while IFS= read -r did; do
+        [[ -z "$did" ]] && continue
+        map=$(echo "$map" | jq --arg id "$did" --arg p "$fpath" '. + {($id): $p}')
+      done <<< "$doc_ids"
+      # Recurse into subfolders
+      local subs
+      subs=$(echo "$folder" | jq -c '.folders // []')
+      if [[ "$subs" != "[]" ]]; then
+        _walk_folders "$subs" "$fpath"
+      fi
+    done <<< "$folders"
+  }
+  local tree
+  tree=$(jq -c '.items' "$FOLDER_CACHE")
+  _walk_folders "$tree" ""
+  echo "$map" > "$DOC_FOLDER_CACHE"
+}
+
+_doc_breadcrumb() {
+  local doc_id="$1"
+  _refresh_doc_folder_cache
+  local path
+  path=$(jq -r --arg id "$doc_id" '.[$id] // empty' "$DOC_FOLDER_CACHE")
+  echo "$path"
 }
 
 # --- mermaid helpers ---
@@ -231,7 +289,7 @@ cmd_search() {
 
   # Search within a specific doc (block-level search)
   if [[ -n "$doc_id" ]]; then
-    local params="blockId=$doc_id&pattern=$(_urlencode "$query")"
+    local params="blockId=$doc_id&pattern=$(_urlencode "(?i)$query")"
     if [[ -n "$context" ]]; then
       params="${params}&beforeBlockCount=$context&afterBlockCount=$context"
     fi
@@ -257,7 +315,7 @@ cmd_search() {
   if $title_flag; then
     params="include=$(_urlencode "$query")"
   else
-    params="regexps=$(_urlencode "$query")"
+    params="regexps=$(_urlencode "(?i)$query")"
   fi
   if [[ -n "$folder" ]]; then
     local folder_id
@@ -279,7 +337,19 @@ cmd_search() {
     return
   fi
 
-  echo "$data" | jq -r '.items[] | "\(.documentId)  \(.markdown // "" | gsub("\n"; " ") | .[:120])"'
+  # Preload breadcrumb cache for folder paths
+  _refresh_doc_folder_cache
+  echo "$data" | jq -r '.items[] | "\(.documentId)"' | while IFS= read -r did; do
+    local crumb
+    crumb=$(jq -r --arg id "$did" '.[$id] // ""' "$DOC_FOLDER_CACHE")
+    local text
+    text=$(echo "$data" | jq -r --arg id "$did" '.items[] | select(.documentId == $id) | .markdown // "" | gsub("\n"; " ") | .[:120]')
+    if [[ -n "$crumb" ]]; then
+      echo "$did  [$crumb]  $text"
+    else
+      echo "$did  $text"
+    fi
+  done
 }
 
 cmd_read() {
@@ -303,9 +373,20 @@ cmd_read() {
   elif $meta_flag; then
     local meta
     meta=$(_api GET "documents?fetchMetadata=true")
+    local breadcrumb
+    breadcrumb=$(_doc_breadcrumb "$doc_id")
+    if [[ -n "$breadcrumb" ]]; then
+      echo "folder: $breadcrumb"
+    fi
     echo "$meta" | jq -r --arg id "$doc_id" '.items[] | select(.id == $id) | "title: \(.title // .id)", "created: \(.createdAt // "unknown")", "modified: \(.lastModifiedAt // "unknown")", ""'
     _api_md "blocks?id=$doc_id"
   else
+    local breadcrumb
+    breadcrumb=$(_doc_breadcrumb "$doc_id")
+    if [[ -n "$breadcrumb" ]]; then
+      echo "$breadcrumb"
+      echo "---"
+    fi
     _api_md "blocks?id=$doc_id"
   fi
 }

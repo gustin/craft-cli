@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Show folder breadcrumbs on `read` and `search` output
+- Case-insensitive search by default via `(?i)` regex prefix
+
 ## 0.6.0
 
 - Consolidate `grep` into `search --doc` for single search interface
