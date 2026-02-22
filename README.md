@@ -133,14 +133,23 @@ All commands accept `--json` for raw API output. Date filters accept ISO dates (
 
 Install as a Claude Code plugin to use craft across any project:
 
+From the terminal or `/plugin` within Claude Code:
+
 ```bash
-/plugin marketplace add gustin/craft-cli
-/plugin install craft@gustin-marketplace
+claude plugin marketplace add gustin/craft-cli
+claude plugin install craft@gustin-marketplace --scope project
 ```
 
-For local development, use `claude --plugin-dir /path/to/craft-cli` instead.
+After pushing new versions, update from the terminal or `/plugin`:
 
-The plugin provides skills that let Claude automatically browse, read, write, and render Craft docs. Set `CRAFT_API_KEY` and `CRAFT_API_BASE` in your shell environment.
+```bash
+claude plugin marketplace update gustin-marketplace
+claude plugin update craft@gustin-marketplace --scope project
+```
+
+Restart Claude Code after installing or updating for changes to take effect.
+
+The plugin provides skills that let Claude browse, read, write, and render Craft docs. Set `CRAFT_API_KEY` and `CRAFT_API_BASE` in your shell environment.
 
 ## Requirements
 
