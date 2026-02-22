@@ -209,24 +209,56 @@ cmd_docs() {
 }
 
 cmd_search() {
-  local query="" folder="" json_flag=false since="" until=""
+  local query="" folder="" doc_id="" json_flag=false title_flag=false since="" until="" context=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --folder|-f) folder="$2"; shift 2 ;;
+      --doc|-d) doc_id="$2"; shift 2 ;;
+      --title|-t) title_flag=true; shift ;;
       --since) since="$2"; shift 2 ;;
       --until) until="$2"; shift 2 ;;
       --json|-j) json_flag=true; shift ;;
+      -C) context="$2"; shift 2 ;;
       -*) shift ;;
       *) query="$1"; shift ;;
     esac
   done
 
   if [[ -z "$query" ]]; then
-    echo "usage: craft search \"query\" [--folder NAME] [--since DATE]" >&2
+    echo "usage: craft search \"pattern\" [--doc ID] [--title] [--folder NAME]" >&2
     return 1
   fi
 
-  local params="include=$(_urlencode "$query")"
+  # Search within a specific doc (block-level search)
+  if [[ -n "$doc_id" ]]; then
+    local params="blockId=$doc_id&pattern=$(_urlencode "$query")"
+    if [[ -n "$context" ]]; then
+      params="${params}&beforeBlockCount=$context&afterBlockCount=$context"
+    fi
+
+    local data
+    data=$(_api GET "blocks/search?$params")
+
+    if $json_flag; then
+      echo "$data" | _jq .
+      return
+    fi
+
+    echo "$data" | jq -r '.items[] |
+      (if .beforeBlocks then .beforeBlocks[] | "  \(.markdown // "")" else empty end),
+      "> \(.markdown // "")",
+      (if .afterBlocks then .afterBlocks[] | "  \(.markdown // "")" else empty end),
+      "---"'
+    return
+  fi
+
+  # Search across all docs
+  local params=""
+  if $title_flag; then
+    params="include=$(_urlencode "$query")"
+  else
+    params="regexps=$(_urlencode "$query")"
+  fi
   if [[ -n "$folder" ]]; then
     local folder_id
     folder_id=$(_resolve_folder "$folder")
@@ -679,45 +711,21 @@ cmd_rmfolder() {
 # --- block-level commands ---
 
 cmd_grep() {
-  local doc_id="" pattern="" json_flag=false context=""
+  # Legacy alias: craft grep "pattern" <docId> -> craft search "pattern" --doc <docId>
+  local positional=() passthrough=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --json|-j) json_flag=true; shift ;;
-      -C) context="$2"; shift 2 ;;
-      -*) shift ;;
-      *)
-        if [[ -z "$pattern" ]]; then
-          pattern="$1"
-        else
-          doc_id="$1"
-        fi
-        shift ;;
+      -C)          passthrough+=("-C" "$2"); shift 2 ;;
+      --json|-j)   passthrough+=("$1"); shift ;;
+      *)           positional+=("$1"); shift ;;
     esac
   done
-
-  if [[ -z "$pattern" || -z "$doc_id" ]]; then
+  if [[ ${#positional[@]} -lt 2 ]]; then
     echo "usage: craft grep \"pattern\" <docId> [-C N]" >&2
+    echo "hint: use 'craft search' to search across all docs" >&2
     return 1
   fi
-
-  local params="blockId=$doc_id&pattern=$(_urlencode "$pattern")"
-  if [[ -n "$context" ]]; then
-    params="${params}&beforeBlockCount=$context&afterBlockCount=$context"
-  fi
-
-  local data
-  data=$(_api GET "blocks/search?$params")
-
-  if $json_flag; then
-    echo "$data" | _jq .
-    return
-  fi
-
-  echo "$data" | jq -r '.items[] |
-    (if .beforeBlocks then .beforeBlocks[] | "  \(.markdown // "")" else empty end),
-    "> \(.markdown // "")",
-    (if .afterBlocks then .afterBlocks[] | "  \(.markdown // "")" else empty end),
-    "---"'
+  cmd_search "${positional[0]}" --doc "${positional[1]}" "${passthrough[@]}"
 }
 
 cmd_rmblock() {
@@ -1087,10 +1095,11 @@ Read:
         [--sort modified|created]           Sort by date (newest first)
         [--since DATE] [--until DATE]       Filter by modified date
         [--limit N]                         Limit results
-  craft search "query" [--folder NAME]    Search across all docs
+  craft search "pattern" [--folder NAME]  Search content across all docs
+        [--title]                           Match doc titles only
+        [--doc ID] [-C N]                   Search within a specific doc
         [--since DATE] [--until DATE]       Filter by modified date
   craft read <docId> [--meta]             Read doc as markdown (--meta for timestamps)
-  craft grep "pattern" <docId> [-C N]     Search blocks within a doc
   craft today                             Read today's daily note
   craft tasks [--scope active|inbox]      List tasks
 

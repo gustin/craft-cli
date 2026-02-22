@@ -8,11 +8,11 @@ Browse and read documents in the Craft.do workspace via the craft CLI.
 
 ## Finding documents
 
-Start with `craft folders` to see the workspace structure, then narrow down with `craft docs --folder NAME` or `craft search "query"` for full-text search. Use `craft recent` to see what changed lately.
+Start with `craft folders` to see the workspace structure, then narrow down with `craft docs --folder NAME` or `craft search "query"` for content search. Use `craft recent` to see what changed lately.
 
 ## Reading content
 
-`craft read <docId>` returns a doc as markdown. Add `--meta` for created/modified timestamps. To search within a doc, use `craft grep "pattern" <docId>`.
+`craft read <docId>` returns a doc as markdown. Add `--meta` for created/modified timestamps. To search within a specific doc, use `craft search "pattern" --doc <docId>`.
 
 ## Commands
 
@@ -23,10 +23,11 @@ Always use this full path when running craft via Bash. Do not assume `craft` is 
 - `folders` -- list folder tree
 - `docs --folder NAME` -- list docs in a folder
 - `recent` -- recently modified docs
-- `search "query"` -- full-text search
+- `search "pattern"` -- content search across all docs
+- `search "query" --title` -- match doc titles only
+- `search "pattern" --doc <docId>` -- search within a specific doc
 - `read <docId>` -- read doc as markdown
 - `read <docId> --meta` -- with timestamps
-- `grep "pattern" <docId>` -- search blocks in a doc
 - `today` -- today's daily note
 - `tasks` -- active tasks
 

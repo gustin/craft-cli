@@ -36,9 +36,11 @@ craft recent
 craft docs --folder Business
 craft docs --sort modified --since today
 craft search "ontology"
+craft search "TODO|FIXME" --folder Product
+craft search "query" --title
+craft search "pattern" --doc <docId>
 craft read <docId>
 craft read <docId> --meta
-craft grep "pattern" <docId>
 craft today
 craft tasks
 ```

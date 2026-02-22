@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- Consolidate `grep` into `search --doc` for single search interface
+- Title-only search with `--title` flag
+- Context lines with `-C` for block-level search
+
 ## 0.5.1
 
 - Use full binary path in skills instead of assuming PATH
